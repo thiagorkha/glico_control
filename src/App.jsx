@@ -4,20 +4,17 @@ import {
 } from 'firebase/app';
 import {
   getAuth,
-  signInWithCustomToken,
-  onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signOut
+  signOut,
+  onAuthStateChanged
 } from 'firebase/auth';
 import {
   getFirestore,
-  doc,
   addDoc,
   collection,
   query,
   where,
-  getDocs,
   onSnapshot,
   Timestamp,
   orderBy,
@@ -27,13 +24,22 @@ import { LogIn, UserPlus, LogOut, Loader2, Save, X, Calendar, Clock, BarChart, A
 
 // =========================================================================
 // 1. CONFIGURAÇÃO E HOOKS DO FIREBASE
+// O App agora lê as configurações do Firebase a partir das variáveis de ambiente
+// injetadas pelo Render (usando o prefixo REACT_APP_).
 // =========================================================================
 
-// As variáveis globais __app_id, __firebase_config e __initial_auth_token
-// são fornecidas pelo ambiente.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// Configuração do Firebase usando variáveis de ambiente
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_API_KEY,
+  authDomain: process.env.REACT_APP_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_APP_ID,
+};
+
+// Usamos o Project ID como um ID de aplicativo robusto para o caminho do Firestore
+const appId = firebaseConfig.projectId || 'default-render-app-id';
 
 // Hook para gerenciar o estado da autenticação
 const useFirebaseAuth = () => {
@@ -41,10 +47,12 @@ const useFirebaseAuth = () => {
   const [loading, setLoading] = useState(true);
   const [db, setDb] = useState(null);
   const [auth, setAuth] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (Object.keys(firebaseConfig).length === 0) {
-      console.error("Firebase config is missing. Cannot initialize.");
+    if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+      console.error("Firebase config is incomplete. Please check environment variables.");
+      setError("Configuração do Firebase ausente ou incompleta. Verifique as variáveis de ambiente.");
       setLoading(false);
       return;
     }
@@ -57,25 +65,16 @@ const useFirebaseAuth = () => {
       setAuth(authInstance);
       setDb(dbInstance);
 
-      const unsubscribe = onAuthStateChanged(authInstance, async (currentUser) => {
-        if (currentUser) {
-          // Usuário autenticado (token ou login manual)
-          setUser(currentUser);
-        } else if (initialAuthToken) {
-          // Tenta o login com o token inicial fornecido pelo ambiente Canvas
-          try {
-            await signInWithCustomToken(authInstance, initialAuthToken);
-          } catch (error) {
-            console.error("Erro ao fazer login com custom token:", error);
-            // Se falhar, o estado continua null, forçando o login ou registro
-          }
-        }
+      // Listener para o estado de autenticação
+      const unsubscribe = onAuthStateChanged(authInstance, (currentUser) => {
+        setUser(currentUser);
         setLoading(false);
       });
 
       return () => unsubscribe();
     } catch (e) {
       console.error("Erro ao inicializar Firebase:", e);
+      setError("Erro ao inicializar Firebase. Detalhes no console.");
       setLoading(false);
     }
   }, []);
@@ -96,11 +95,11 @@ const useFirebaseAuth = () => {
     }
   }, [auth]);
 
-  return { user, loading, db, auth, handleSignOut };
+  return { user, loading, db, auth, handleSignOut, error };
 };
 
 // =========================================================================
-// 2. COMPONENTES UTILITÁRIOS
+// 2. COMPONENTES UTILITÁRIOS (Sem Alterações na Lógica)
 // =========================================================================
 
 const Card = ({ children, className = '' }) => (
@@ -109,7 +108,7 @@ const Card = ({ children, className = '' }) => (
   </div>
 );
 
-const Button = ({ children, onClick, disabled = false, icon: Icon, className = '', variant = 'primary' }) => {
+const Button = ({ children, onClick, disabled = false, icon: Icon, className = '', variant = 'primary', type = 'button' }) => {
   let baseStyle = "flex items-center justify-center space-x-2 px-4 py-2 rounded-lg font-semibold transition-all duration-200 shadow-md";
   let variantStyle = "";
 
@@ -133,11 +132,12 @@ const Button = ({ children, onClick, disabled = false, icon: Icon, className = '
 
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={`${baseStyle} ${variantStyle} ${className}`}
     >
-      {Icon && <Icon className="w-5 h-5" />}
+      {Icon && Icon === Loader2 ? <Loader2 className="w-5 h-5 animate-spin" /> : Icon && <Icon className="w-5 h-5" />}
       <span>{children}</span>
     </button>
   );
@@ -349,7 +349,7 @@ const Register = ({ auth, setView }) => {
 
     // Em um app real, o "username" seria salvo em outro lugar,
     // mas aqui o e-mail será usado como identificador de login.
-    const username = email; // Simplesmente usando o e-mail como username aqui
+    // O Firebase Auth usa o e-mail como identificador único.
 
     try {
       await createUserWithEmailAndPassword(auth, email, password);
@@ -376,11 +376,6 @@ const Register = ({ auth, setView }) => {
           required
           placeholder="seu@email.com (Será seu login)"
         />
-        {/*
-        Nota: O campo "Nome de Usuário" é substituído pelo E-mail,
-        que é o identificador único para o Firebase Auth.
-        O Firebase Auth não armazena um campo "username" por padrão.
-        */}
         <Input
           label="Senha (Mínimo 6 caracteres)"
           id="register-password"
@@ -413,6 +408,7 @@ const Register = ({ auth, setView }) => {
 // =========================================================================
 
 const GlicemiaTracker = ({ db, userId, handleSignOut }) => {
+  // Caminho da coleção adaptado para usar o appId (que é o project ID)
   const GLICEMIA_COLLECTION = `artifacts/${appId}/users/${userId}/glicemia_records`;
 
   // Formulário
@@ -704,7 +700,7 @@ const GlicemiaTracker = ({ db, userId, handleSignOut }) => {
 // =========================================================================
 
 const App = () => {
-  const { user, loading: loadingAuth, db, auth, handleSignOut } = useFirebaseAuth();
+  const { user, loading: loadingAuth, db, auth, handleSignOut, error: firebaseError } = useFirebaseAuth();
   const [view, setView] = useState('login'); // 'login', 'register', 'tracker'
 
   // Redireciona a visualização com base no estado de autenticação
@@ -718,6 +714,18 @@ const App = () => {
   }, [user, loadingAuth]);
 
   const renderContent = () => {
+    if (firebaseError) {
+        return (
+            <div className="p-8">
+                <Message type="error">
+                    <AlertTriangle className="w-5 h-5 inline-block mr-2" />
+                    Erro de Inicialização do Firebase: {firebaseError}
+                    <p className="mt-2">Verifique se todas as variáveis de ambiente (REACT_APP_...) estão configuradas corretamente no Render.</p>
+                </Message>
+            </div>
+        );
+    }
+
     if (loadingAuth) {
       return (
         <div className="flex flex-col items-center justify-center h-screen space-y-4">
