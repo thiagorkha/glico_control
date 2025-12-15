@@ -3,15 +3,578 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Glicemia Control - Login e Firestore</title>
-    <!-- Incluindo Tailwind CSS via CDN para garantir a estilização no ambiente Render/Build -->
-    <script src="https://cdn.tailwindcss.com"></script> 
+    <title>Controle de Glicemia</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- Fonte Google -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Ícones -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        /* Estilos específicos para impressão */
+        @media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; }
+            #results-area, .chart-container { box-shadow: none; border: none; }
+            /* Garantir que cores de fundo apareçam na impressão */
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .registro-card { margin-right: 0.5rem; }
+        }
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+    </style>
 </head>
 <body>
-    <noscript>Você precisa habilitar o JavaScript para rodar este aplicativo.</noscript>
-    <div id="root"></div>
-    <!-- O script de build gerado pelo react-scripts será injetado automaticamente aqui -->
+    <div class="app-container p-6">
+        <header class="mb-8 flex justify-between items-center no-print">
+            <h1 class="text-2xl font-bold text-gray-800">Glicemia Control</h1>
+            <button id="nav-button" onclick="toggleView()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md">
+                Histórico
+            </button>
+        </header>
+
+        <!-- Área para Mensagens de Erro/Sucesso -->
+        <div id="message-area" class="mb-4 hidden" role="alert"></div>
+
+        <!-- VIEW 1: REGISTRO (PADRÃO) -->
+        <div id="record-view" class="view-content">
+            <section class="mb-8 p-4 border border-gray-200 rounded-xl shadow-sm">
+                <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                    <i data-lucide="droplets" class="w-5 h-5 mr-2"></i>
+                    Novo Registro
+                </h2>
+                
+                <form id="record-form" onsubmit="handleRecordSubmit(event)" class="space-y-4">
+                    <div>
+                        <label for="glicemia" class="block text-sm font-medium text-gray-700">Valor da Glicemia (mg/dL)</label>
+                        <input type="number" id="glicemia" name="glicemia" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Ex: 105" min="10" max="999">
+                    </div>
+                    <div>
+                        <label for="data" class="block text-sm font-medium text-gray-700">Data</label>
+                        <input type="date" id="data" name="data" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                    </div>
+                    <div>
+                        <label for="hora" class="block text-sm font-medium text-gray-700">Hora</label>
+                        <input type="time" id="hora" name="hora" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                    </div>
+                    
+                    <button type="submit" id="record-submit-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                        <i data-lucide="save" class="w-5 h-5 mr-2"></i>
+                        Salvar Registro
+                    </button>
+                </form>
+            </section>
+        </div>
+
+        <!-- VIEW 2: HISTÓRICO E RELATÓRIOS -->
+        <div id="history-view" class="view-content hidden">
+            <section class="mb-8 p-4 border border-gray-200 rounded-xl shadow-sm no-print">
+                <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                    <i data-lucide="calendar" class="w-5 h-5 mr-2"></i>
+                    Filtro de Período
+                </h2>
+                <form id="filter-form" onsubmit="handleFilterSubmit(event)" class="space-y-4">
+                    <div>
+                        <label for="start-date" class="block text-sm font-medium text-gray-700">Data de Início</label>
+                        <input type="date" id="start-date" name="start-date" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                    </div>
+                    <div>
+                        <label for="end-date" class="block text-sm font-medium text-gray-700">Data Final</label>
+                        <input type="date" id="end-date" name="end-date" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                    </div>
+                    <button type="submit" id="filter-submit-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                        <i data-lucide="filter" class="w-5 h-5 mr-2"></i>
+                        Filtrar Registros
+                    </button>
+                </form>
+            </section>
+            
+            <section id="print-actions" class="mb-6 no-print">
+                <button onclick="window.print()" class="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                    <i data-lucide="printer" class="w-5 h-5 mr-2"></i>
+                    Imprimir Relatório do Período
+                </button>
+            </section>
+
+            <!-- Área de Resultados (Imprimível) -->
+            <div class="print-only hidden text-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Relatório de Glicemia</h2>
+                <p id="print-period-info" class="text-gray-600"></p>
+            </div>
+            
+            <section id="charts-area" class="mb-8 space-y-8">
+                <!-- Gráfico 1: Média Diária -->
+                <div class="chart-container p-4 border border-gray-200 rounded-xl shadow-sm bg-white">
+                    <h3 class="text-lg font-semibold mb-3 text-indigo-600">Média Diária de Glicemia</h3>
+                    <canvas id="chart-daily-average"></canvas>
+                </div>
+                <!-- Gráfico 2: Todos os Registros -->
+                <div class="chart-container p-4 border border-gray-200 rounded-xl shadow-sm bg-white">
+                    <h3 class="text-lg font-semibold mb-3 text-indigo-600">Todos os Registros</h3>
+                    <canvas id="chart-all-records"></canvas>
+                </div>
+            </section>
+
+            <section id="results-area" class="p-4 border border-gray-200 rounded-xl shadow-lg bg-white">
+                <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                    <i data-lucide="clipboard-list" class="w-5 h-5 mr-2"></i>
+                    Histórico de Registros
+                </h2>
+                <div id="results-content" class="space-y-6">
+                    <p class="text-gray-500">Selecione um período para visualizar os resultados.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        // =================================================================
+        // CONFIGURAÇÃO GERAL
+        // =================================================================
+        const SCRIPT_URL = 'YOUR_APPS_SCRIPT_DEPLOY_URL'; // Substitua pela sua URL
+        let currentView = 'record'; // 'record' ou 'history'
+
+        // Inicializa o Lucide Icons
+        function renderIcons() {
+            lucide.createIcons();
+        }
+
+        // =================================================================
+        // NAVEGAÇÃO
+        // =================================================================
+        function toggleView() {
+            const recordView = document.getElementById('record-view');
+            const historyView = document.getElementById('history-view');
+            const navButton = document.getElementById('nav-button');
+
+            if (currentView === 'record') {
+                recordView.classList.add('hidden');
+                historyView.classList.remove('hidden');
+                navButton.innerHTML = '<i data-lucide="plus-square" class="w-5 h-5 mr-2"></i> Novo Registro';
+                currentView = 'history';
+                // Renderiza ícones e tenta filtrar o histórico ao entrar na view
+                renderIcons(); 
+                document.getElementById('filter-form').dispatchEvent(new Event('submit'));
+            } else {
+                historyView.classList.add('hidden');
+                recordView.classList.remove('hidden');
+                navButton.innerHTML = '<i data-lucide="history" class="w-5 h-5 mr-2"></i> Histórico';
+                currentView = 'record';
+                renderIcons();
+            }
+        }
+        
+        // =================================================================
+        // UTILITÁRIOS E UI
+        // =================================================================
+
+        let chartDailyAverage = null;
+        let chartAllRecords = null;
+        
+        function showMessage(message, type = 'success') {
+            const area = document.getElementById('message-area');
+            area.innerHTML = message;
+            area.classList.remove('hidden', 'bg-red-100', 'bg-green-100', 'border-red-400', 'border-green-400', 'text-red-700', 'text-green-700');
+            
+            if (type === 'success') {
+                area.classList.add('bg-green-100', 'border-green-400', 'text-green-700', 'p-3', 'rounded-lg', 'border');
+            } else {
+                area.classList.add('bg-red-100', 'border-red-400', 'text-red-700', 'p-3', 'rounded-lg', 'border');
+            }
+            // Oculta após 5 segundos, exceto se for erro
+            if (type === 'success') {
+                setTimeout(() => area.classList.add('hidden'), 5000);
+            }
+        }
+
+        function toggleLoading(isLoading, buttonId) {
+            const btn = document.getElementById(buttonId);
+            const icon = btn.querySelector('i');
+            btn.disabled = isLoading;
+            if (isLoading) {
+                btn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i> Processando...';
+            } else {
+                // Restaura o conteúdo original baseado no ID
+                if (buttonId === 'record-submit-btn') {
+                    btn.innerHTML = '<i data-lucide="save" class="w-5 h-5 mr-2"></i> Salvar Registro';
+                } else if (buttonId === 'filter-submit-btn') {
+                    btn.innerHTML = '<i data-lucide="filter" class="w-5 h-5 mr-2"></i> Filtrar Registros';
+                }
+            }
+            renderIcons(); // Recria os ícones do Lucide
+        }
+        
+        // =================================================================
+        // FIREBASE/BACKEND SIMULADO (MOCK PARA DEMO)
+        // =================================================================
+        const MOCK_KEY = 'glico_demo_data';
+        
+        function mockSave(payload) {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const current = JSON.parse(localStorage.getItem(MOCK_KEY) || '[]');
+                    current.push(payload);
+                    localStorage.setItem(MOCK_KEY, JSON.stringify(current));
+                    resolve();
+                }, 800);
+            });
+        }
+
+        function mockRead(start, end) {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const all = JSON.parse(localStorage.getItem(MOCK_KEY) || '[]');
+                    
+                    // Converte strings de data DD/MM/AAAA para objetos Date para comparação
+                    const parseDate = (dateStr) => {
+                        const [d, m, y] = dateStr.split('/');
+                        return new Date(y, m - 1, d); // Mês é 0-indexado
+                    };
+
+                    // Formata a data de entrada YYYY-MM-DD para o formato interno DD/MM/AAAA
+                    const formatInputDate = (inputDateStr) => {
+                        const [y, m, d] = inputDateStr.split('-');
+                        return `${d}/${m}/${y}`;
+                    };
+
+                    const startDate = parseDate(formatInputDate(start));
+                    const endDate = parseDate(formatInputDate(end));
+                    
+                    const filtered = all.filter(item => {
+                        const itemDate = parseDate(item.data);
+                        // Filtra comparando apenas as datas, ignorando a hora
+                        return itemDate >= startDate && itemDate <= endDate;
+                    });
+                    
+                    // Ordena por Data (crescente) e depois por Hora (crescente)
+                    filtered.sort((a, b) => {
+                        const dateA = a.data.split('/').reverse().join('') + a.hora.replace(':', '');
+                        const dateB = b.data.split('/').reverse().join('') + b.hora.replace(':', '');
+                        return dateA.localeCompare(dateB);
+                    });
+
+                    resolve(filtered);
+                }, 800);
+            });
+        }
+
+        // =================================================================
+        // FUNÇÕES DE SUBMISSÃO
+        // =================================================================
+
+        function handleRecordSubmit(event) {
+            event.preventDefault();
+            toggleLoading(true, 'record-submit-btn');
+
+            const form = event.target;
+            const data = new FormData(form);
+            
+            // Re-formata a data de YYYY-MM-DD (input) para DD/MM/AAAA (padrão interno)
+            const [y, m, d] = data.get('data').split('-');
+            const formattedDate = `${d}/${m}/${y}`;
+
+            const payload = {
+                data: formattedDate,
+                hora: data.get('hora'),
+                glicemia: data.get('glicemia'),
+            };
+
+            // Simulação de salvamento no backend (usando mock)
+            mockSave(payload)
+                .then(() => {
+                    showMessage('Registro de glicemia salvo com sucesso!');
+                    form.reset();
+                    // Define a data atual nos campos após o reset
+                    document.getElementById('data').valueAsDate = new Date();
+                    document.getElementById('hora').value = new Date().toTimeString().slice(0, 5);
+                })
+                .catch(error => {
+                    console.error("Erro ao salvar:", error);
+                    showMessage('Erro ao salvar o registro. Detalhes no console.', 'error');
+                })
+                .finally(() => {
+                    toggleLoading(false, 'record-submit-btn');
+                });
+        }
+
+        function handleFilterSubmit(event) {
+            event.preventDefault();
+            toggleLoading(true, 'filter-submit-btn');
+
+            const start = document.getElementById('start-date').value;
+            const end = document.getElementById('end-date').value;
+
+            // Define informações do período para impressão
+            document.getElementById('print-period-info').textContent = 
+                `Período: ${start.split('-').reverse().join('/')} a ${end.split('-').reverse().join('/')}`;
+
+            mockRead(start, end)
+                .then(records => {
+                    if (records.length === 0) {
+                        document.getElementById('results-content').innerHTML = '<p class="text-gray-500">Nenhum registro encontrado no período selecionado.</p>';
+                        renderCharts([], []); // Limpa os gráficos
+                        return;
+                    }
+                    
+                    // Processa, renderiza a lista e os gráficos
+                    const processed = processDataForDisplay(records);
+                    renderResults(processed.groupedByDate);
+                    renderCharts(processed.dailyAverageData, processed.allRecordsForChart);
+                })
+                .catch(error => {
+                    console.error("Erro ao filtrar:", error);
+                    showMessage('Erro ao buscar o histórico. Detalhes no console.', 'error');
+                })
+                .finally(() => {
+                    toggleLoading(false, 'filter-submit-btn');
+                });
+        }
+
+        // =================================================================
+        // PROCESSAMENTO DE DADOS E RENDERIZAÇÃO
+        // =================================================================
+
+        /**
+         * Processa a lista de registros para agrupamento por data e cálculo de médias.
+         * @param {Array<Object>} records - Lista de registros {data, hora, glicemia}.
+         */
+        function processDataForDisplay(records) {
+            const groupedByDate = {};
+            const dailyData = {}; // Usado para calcular a média
+            const allRecordsForChart = [];
+
+            records.forEach(record => {
+                const { data, hora, glicemia } = record;
+                const value = parseFloat(glicemia);
+
+                // 1. Group by Date for display
+                if (!groupedByDate[data]) {
+                    groupedByDate[data] = [];
+                }
+                groupedByDate[data].push({ hora, glicemia: value });
+                
+                // 2. Group by Date for average calculation
+                if (!dailyData[data]) {
+                    dailyData[data] = { sum: 0, count: 0 };
+                }
+                dailyData[data].sum += value;
+                dailyData[data].count++;
+
+                // 3. Data for All Records Chart
+                allRecordsForChart.push({
+                    x: `${data} ${hora}`,
+                    y: value,
+                    date: data,
+                    time: hora
+                });
+            });
+
+            // 4. Calculate Daily Averages
+            const dailyAverageData = [];
+            
+            Object.keys(dailyData).forEach(date => {
+                const { sum, count } = dailyData[date];
+                const average = sum / count;
+
+                dailyAverageData.push({
+                    date: date,
+                    average: parseFloat(average.toFixed(1))
+                });
+            });
+
+            // Sort daily average data by date for chart consistency
+            dailyAverageData.sort((a, b) => {
+                const dateA = a.date.split('/').reverse().join('');
+                const dateB = b.date.split('/').reverse().join('');
+                return dateA.localeCompare(dateB);
+            });
+            
+            return { groupedByDate, dailyAverageData, allRecordsForChart };
+        }
+
+
+        /**
+         * Renderiza o histórico de registros agrupados por data.
+         * @param {Object} groupedData - Dados agrupados por data.
+         */
+        function renderResults(groupedData) {
+            const resultsContent = document.getElementById('results-content');
+            resultsContent.innerHTML = '';
+            
+            const sortedDates = Object.keys(groupedData).sort((a, b) => {
+                // Ordena por data (DD/MM/AAAA) em ordem decrescente
+                const dateA = a.split('/').reverse().join('');
+                const dateB = b.split('/').reverse().join('');
+                return dateB.localeCompare(dateA);
+            });
+
+            sortedDates.forEach(date => {
+                const records = groupedData[date];
+                
+                // O card principal para cada dia
+                const dayCard = document.createElement('div');
+                dayCard.className = 'day-card p-4 border border-indigo-100 bg-indigo-50 rounded-lg shadow-sm';
+                
+                // Título do Dia
+                const dateTitle = document.createElement('h3');
+                dateTitle.className = 'text-lg font-bold text-indigo-800 mb-3 border-b border-indigo-200 pb-1';
+                dateTitle.textContent = `Data: ${date}`;
+                dayCard.appendChild(dateTitle);
+
+                // Container para os registros do dia (disposição horizontal)
+                const recordsContainer = document.createElement('div');
+                recordsContainer.className = 'flex flex-wrap overflow-x-auto gap-3 pb-2'; // Usar flex-wrap e gap
+
+                // Ordena os registros por hora (já devem vir ordenados, mas garante)
+                records.sort((a, b) => a.hora.localeCompare(b.hora));
+
+                records.forEach(record => {
+                    const statusClass = record.glicemia < 70 ? 'bg-red-200 text-red-800' : 
+                                        record.glicemia > 180 ? 'bg-yellow-200 text-yellow-800' : 
+                                        'bg-green-200 text-green-800';
+
+                    const recordCard = document.createElement('div');
+                    recordCard.className = `registro-card flex-shrink-0 p-3 rounded-lg font-semibold text-center ${statusClass} border border-gray-300 shadow-sm`;
+                    recordCard.innerHTML = `
+                        <div class="text-xs text-gray-700 font-normal">Hora: ${record.hora}</div>
+                        <div class="text-xl font-bold">${record.glicemia}</div>
+                        <div class="text-xs text-gray-700 font-normal">mg/dL</div>
+                    `;
+                    recordsContainer.appendChild(recordCard);
+                });
+
+                dayCard.appendChild(recordsContainer);
+                resultsContent.appendChild(dayCard);
+            });
+        }
+        
+        /**
+         * Renderiza os dois gráficos de linha (Média Diária e Todos os Registros).
+         * @param {Array<Object>} dailyAverageData - Dados da média diária.
+         * @param {Array<Object>} allRecordsData - Todos os registros para o gráfico.
+         */
+        function renderCharts(dailyAverageData, allRecordsData) {
+            // --- GRÁFICO 1: Média Diária ---
+            const ctxAvg = document.getElementById('chart-daily-average').getContext('2d');
+            if (chartDailyAverage) chartDailyAverage.destroy();
+
+            chartDailyAverage = new Chart(ctxAvg, {
+                type: 'line',
+                data: {
+                    labels: dailyAverageData.map(d => d.date),
+                    datasets: [{
+                        label: 'Média Diária (mg/dL)',
+                        data: dailyAverageData.map(d => d.average),
+                        borderColor: 'rgb(79, 70, 229)', // Indigo 600
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: false }
+                    },
+                    scales: {
+                        y: { 
+                            beginAtZero: false, 
+                            title: { display: true, text: 'Glicemia (mg/dL)' }
+                        },
+                        x: { 
+                            title: { display: true, text: 'Data' }
+                        }
+                    }
+                }
+            });
+
+            // --- GRÁFICO 2: Todos os Registros ---
+            const ctxAll = document.getElementById('chart-all-records').getContext('2d');
+            if (chartAllRecords) chartAllRecords.destroy();
+
+            // Mapeia os dados para X (Data/Hora) e Y (Valor)
+            const labelsAll = allRecordsData.map(r => r.x);
+            const dataAll = allRecordsData.map(r => r.y);
+
+            chartAllRecords = new Chart(ctxAll, {
+                type: 'line',
+                data: {
+                    labels: labelsAll,
+                    datasets: [{
+                        label: 'Registros Individuais (mg/dL)',
+                        data: dataAll,
+                        borderColor: 'rgb(6, 182, 212)', // Cyan 600
+                        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 3,
+                        showLine: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: false }
+                    },
+                    scales: {
+                        y: { 
+                            beginAtZero: false, 
+                            title: { display: true, text: 'Glicemia (mg/dL)' }
+                        },
+                        x: { 
+                            title: { display: true, text: 'Data e Hora' },
+                            // Oculta muitos ticks para evitar congestionamento
+                            ticks: {
+                                maxTicksLimit: 10 
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+
+        // =================================================================
+        // INICIALIZAÇÃO
+        // =================================================================
+        window.onload = function() {
+            // Define data e hora atual nos campos de registro
+            document.getElementById('data').valueAsDate = new Date();
+            document.getElementById('hora').value = new Date().toTimeString().slice(0, 5);
+
+            // Define período padrão (últimos 7 dias) nos campos de filtro
+            const today = new Date();
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(today.getDate() - 7);
+
+            const formatDate = (date) => {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            };
+
+            document.getElementById('start-date').value = formatDate(sevenDaysAgo);
+            document.getElementById('end-date').value = formatDate(today);
+            
+            // Renderiza ícones iniciais
+            renderIcons();
+        };
+
+        // Chama a função de renderização de ícones no final de qualquer manipulação de DOM que os crie
+        document.addEventListener('DOMContentLoaded', renderIcons);
+
+    </script>
 </body>
 </html>
