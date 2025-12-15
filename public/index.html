@@ -3,15 +3,778 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Glicemia Control - Login e Firestore</title>
-    <!-- Incluindo Tailwind CSS via CDN para garantir a estilização no ambiente Render/Build -->
-    <script src="https://cdn.tailwindcss.com"></script> 
+    <title>Controle de Glicemia com Firebase</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- Fonte Google -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- Ícones -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        /* Estilos específicos para impressão */
+        @media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; }
+            #results-area, .chart-container { box-shadow: none; border: none; }
+            /* Garantir que cores de fundo apareçam na impressão */
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .registro-card { margin-right: 0.5rem; }
+        }
+        .app-container {
+            max-width: 480px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+    </style>
 </head>
 <body>
-    <noscript>Você precisa habilitar o JavaScript para rodar este aplicativo.</noscript>
-    <div id="root"></div>
-    <!-- O script de build gerado pelo react-scripts será injetado automaticamente aqui -->
+    <div class="app-container p-6">
+        <!-- ÁREA DE LOADING E AUTH PENDENTE -->
+        <div id="loading-view" class="flex flex-col items-center justify-center h-96">
+            <i data-lucide="loader" class="w-10 h-10 text-indigo-500 animate-spin mb-4"></i>
+            <p class="text-gray-600">Carregando aplicação...</p>
+        </div>
+
+        <!-- ÁREA DE LOGIN/REGISTRO -->
+        <div id="auth-view" class="hidden">
+            <h1 class="text-3xl font-bold text-center text-indigo-700 mb-8">Bem-vindo ao Glicemia Control</h1>
+            <div id="auth-switcher" class="flex justify-center mb-6">
+                <button onclick="showAuthMode('login')" id="btn-login-mode" class="px-4 py-2 border-b-2 border-indigo-600 font-semibold text-indigo-600">Login</button>
+                <button onclick="showAuthMode('register')" id="btn-register-mode" class="px-4 py-2 border-b-2 border-gray-300 font-semibold text-gray-500">Cadastre-se</button>
+            </div>
+
+            <div id="login-form-container">
+                <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4 p-4 border rounded-xl shadow-sm">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">Fazer Login</h2>
+                    <div>
+                        <label for="login-email" class="block text-sm font-medium text-gray-700">Email</label>
+                        <input type="email" id="login-email" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="login-password" class="block text-sm font-medium text-gray-700">Senha</label>
+                        <input type="password" id="login-password" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2">
+                    </div>
+                    <button type="submit" id="login-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-150">Login</button>
+                </form>
+            </div>
+
+            <div id="register-form-container" class="hidden">
+                <form id="register-form" onsubmit="handleRegister(event)" class="space-y-4 p-4 border rounded-xl shadow-sm">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">Criar Conta</h2>
+                    <div>
+                        <label for="register-email" class="block text-sm font-medium text-gray-700">Email</label>
+                        <input type="email" id="register-email" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="register-password" class="block text-sm font-medium text-gray-700">Senha</label>
+                        <input type="password" id="register-password" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-2" minlength="6">
+                        <p class="text-xs text-gray-500 mt-1">Mínimo de 6 caracteres.</p>
+                    </div>
+                    <button type="submit" id="register-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition duration-150">Cadastrar</button>
+                </form>
+            </div>
+            <p id="auth-error-message" class="text-red-600 mt-4 text-center"></p>
+        </div>
+
+
+        <!-- ÁREA PRINCIPAL DO APP (APÓS LOGIN) -->
+        <div id="main-app-view" class="hidden">
+            <header class="mb-8 flex justify-between items-center no-print">
+                <h1 class="text-2xl font-bold text-gray-800">Glicemia Control</h1>
+                <div class="flex items-center space-x-2">
+                    <button id="nav-button" onclick="toggleView()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150 shadow-md flex items-center">
+                        <i data-lucide="history" class="w-5 h-5 mr-1"></i>
+                        Histórico
+                    </button>
+                    <button onclick="handleLogout()" class="text-red-500 hover:text-red-700 p-2 rounded-full transition duration-150" title="Sair">
+                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Área para Mensagens de Erro/Sucesso -->
+            <div id="message-area" class="mb-4 hidden" role="alert"></div>
+
+            <!-- VIEW 1: REGISTRO (PADRÃO) -->
+            <div id="record-view" class="view-content">
+                <section class="mb-8 p-4 border border-gray-200 rounded-xl shadow-sm">
+                    <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                        <i data-lucide="droplets" class="w-5 h-5 mr-2"></i>
+                        Novo Registro
+                    </h2>
+                    
+                    <form id="record-form" onsubmit="handleRecordSubmit(event)" class="space-y-4">
+                        <div>
+                            <label for="glicemia" class="block text-sm font-medium text-gray-700">Valor da Glicemia (mg/dL)</label>
+                            <input type="number" id="glicemia" name="glicemia" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Ex: 105" min="10" max="999">
+                        </div>
+                        <div>
+                            <label for="data" class="block text-sm font-medium text-gray-700">Data</label>
+                            <input type="date" id="data" name="data" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                        </div>
+                        <div>
+                            <label for="hora" class="block text-sm font-medium text-gray-700">Hora</label>
+                            <input type="time" id="hora" name="hora" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                        </div>
+                        
+                        <button type="submit" id="record-submit-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                            <i data-lucide="save" class="w-5 h-5 mr-2"></i>
+                            Salvar Registro
+                        </button>
+                    </form>
+                </section>
+            </div>
+
+            <!-- VIEW 2: HISTÓRICO E RELATÓRIOS -->
+            <div id="history-view" class="view-content hidden">
+                <section class="mb-8 p-4 border border-gray-200 rounded-xl shadow-sm no-print">
+                    <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                        <i data-lucide="calendar" class="w-5 h-5 mr-2"></i>
+                        Filtro de Período
+                    </h2>
+                    <form id="filter-form" onsubmit="handleFilterSubmit(event)" class="space-y-4">
+                        <div>
+                            <label for="start-date" class="block text-sm font-medium text-gray-700">Data de Início</label>
+                            <input type="date" id="start-date" name="start-date" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                        </div>
+                        <div>
+                            <label for="end-date" class="block text-sm font-medium text-gray-700">Data Final</label>
+                            <input type="date" id="end-date" name="end-date" required class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                        </div>
+                        <button type="submit" id="filter-submit-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                            <i data-lucide="filter" class="w-5 h-5 mr-2"></i>
+                            Filtrar Registros
+                        </button>
+                    </form>
+                </section>
+                
+                <section id="print-actions" class="mb-6 no-print">
+                    <button onclick="window.print()" class="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-lg flex items-center justify-center">
+                        <i data-lucide="printer" class="w-5 h-5 mr-2"></i>
+                        Imprimir Relatório do Período
+                    </button>
+                </section>
+
+                <!-- Área de Resultados (Imprimível) -->
+                <div class="print-only hidden text-center mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Relatório de Glicemia</h2>
+                    <p id="print-period-info" class="text-gray-600"></p>
+                </div>
+                
+                <section id="charts-area" class="mb-8 space-y-8">
+                    <!-- Gráfico 1: Média Diária -->
+                    <div class="chart-container p-4 border border-gray-200 rounded-xl shadow-sm bg-white">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-600">Média Diária de Glicemia</h3>
+                        <canvas id="chart-daily-average"></canvas>
+                    </div>
+                    <!-- Gráfico 2: Todos os Registros -->
+                    <div class="chart-container p-4 border border-gray-200 rounded-xl shadow-sm bg-white">
+                        <h3 class="text-lg font-semibold mb-3 text-indigo-600">Todos os Registros</h3>
+                        <canvas id="chart-all-records"></canvas>
+                    </div>
+                </section>
+
+                <section id="results-area" class="p-4 border border-gray-200 rounded-xl shadow-lg bg-white">
+                    <h2 class="text-xl font-semibold mb-4 text-indigo-700 flex items-center">
+                        <i data-lucide="clipboard-list" class="w-5 h-5 mr-2"></i>
+                        Histórico de Registros
+                    </h2>
+                    <div id="results-content" class="space-y-6">
+                        <p class="text-gray-500">Selecione um período para visualizar os resultados.</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE CDN IMPORTS -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            signInWithCustomToken, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            signOut 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            query, 
+            where, 
+            getDocs, 
+            Timestamp
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // =================================================================
+        // CONFIGURAÇÃO FIREBASE E VARIÁVEIS GLOBAIS
+        // =================================================================
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app;
+        let auth;
+        let db;
+        let userId = null;
+        let isAuthReady = false;
+        let currentView = 'record'; // 'record' ou 'history'
+
+        // =================================================================
+        // UTILITÁRIOS E UI
+        // =================================================================
+        
+        // Define data e hora atual
+        function setInitialDateTime() {
+            document.getElementById('data').valueAsDate = new Date();
+            document.getElementById('hora').value = new Date().toTimeString().slice(0, 5);
+        }
+
+        // Define período padrão (últimos 7 dias)
+        function setInitialFilterDates() {
+            const today = new Date();
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(today.getDate() - 7);
+
+            const formatDate = (date) => {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            };
+
+            document.getElementById('start-date').value = formatDate(sevenDaysAgo);
+            document.getElementById('end-date').value = formatDate(today);
+        }
+        
+        function showMessage(message, type = 'success') {
+            const area = document.getElementById('message-area');
+            area.innerHTML = message;
+            area.classList.remove('hidden', 'bg-red-100', 'bg-green-100', 'border-red-400', 'border-green-400', 'text-red-700', 'text-green-700');
+            
+            if (type === 'success') {
+                area.classList.add('bg-green-100', 'border-green-400', 'text-green-700', 'p-3', 'rounded-lg', 'border');
+            } else {
+                area.classList.add('bg-red-100', 'border-red-400', 'text-red-700', 'p-3', 'rounded-lg', 'border');
+            }
+            if (type === 'success') {
+                setTimeout(() => area.classList.add('hidden'), 5000);
+            }
+        }
+
+        function toggleLoading(isLoading, buttonId) {
+            const btn = document.getElementById(buttonId);
+            btn.disabled = isLoading;
+            if (isLoading) {
+                btn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i> Processando...';
+            } else {
+                if (buttonId === 'record-submit-btn') {
+                    btn.innerHTML = '<i data-lucide="save" class="w-5 h-5 mr-2"></i> Salvar Registro';
+                } else if (buttonId === 'filter-submit-btn') {
+                    btn.innerHTML = '<i data-lucide="filter" class="w-5 h-5 mr-2"></i> Filtrar Registros';
+                } else if (buttonId === 'login-btn') {
+                    btn.innerHTML = 'Login';
+                } else if (buttonId === 'register-btn') {
+                    btn.innerHTML = 'Cadastrar';
+                }
+            }
+            lucide.createIcons();
+        }
+
+        function showAuthMode(mode) {
+            const loginContainer = document.getElementById('login-form-container');
+            const registerContainer = document.getElementById('register-form-container');
+            const btnLogin = document.getElementById('btn-login-mode');
+            const btnRegister = document.getElementById('btn-register-mode');
+
+            if (mode === 'login') {
+                loginContainer.classList.remove('hidden');
+                registerContainer.classList.add('hidden');
+                btnLogin.classList.add('border-indigo-600', 'text-indigo-600');
+                btnLogin.classList.remove('border-gray-300', 'text-gray-500');
+                btnRegister.classList.remove('border-indigo-600', 'text-indigo-600');
+                btnRegister.classList.add('border-gray-300', 'text-gray-500');
+            } else {
+                loginContainer.classList.add('hidden');
+                registerContainer.classList.remove('hidden');
+                btnRegister.classList.add('border-indigo-600', 'text-indigo-600');
+                btnRegister.classList.remove('border-gray-300', 'text-gray-500');
+                btnLogin.classList.remove('border-indigo-600', 'text-indigo-600');
+                btnLogin.classList.add('border-gray-300', 'text-gray-500');
+            }
+            document.getElementById('auth-error-message').textContent = '';
+        }
+
+        // =================================================================
+        // FIREBASE AUTHENTICATION
+        // =================================================================
+
+        const handleAuthError = (error, buttonId) => {
+            console.error("Erro de autenticação:", error);
+            toggleLoading(false, buttonId);
+            let msg = 'Ocorreu um erro desconhecido.';
+            
+            if (error.code) {
+                switch (error.code) {
+                    case 'auth/user-not-found':
+                    case 'auth/wrong-password':
+                        msg = 'Email ou senha inválidos.';
+                        break;
+                    case 'auth/email-already-in-use':
+                        msg = 'Este email já está cadastrado.';
+                        break;
+                    case 'auth/weak-password':
+                        msg = 'A senha deve ter pelo menos 6 caracteres.';
+                        break;
+                    default:
+                        msg = `Erro: ${error.code.replace('auth/', '')}`;
+                }
+            }
+            document.getElementById('auth-error-message').textContent = msg;
+        };
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            toggleLoading(true, 'login-btn');
+            document.getElementById('auth-error-message').textContent = '';
+
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                handleAuthError(error, 'login-btn');
+            }
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            toggleLoading(true, 'register-btn');
+            document.getElementById('auth-error-message').textContent = '';
+
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+            } catch (error) {
+                handleAuthError(error, 'register-btn');
+            }
+        }
+        
+        async function handleLogout() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Erro ao fazer logout:", error);
+                showMessage('Erro ao sair. Tente novamente.', 'error');
+            }
+        }
+
+        function setupAuthListener() {
+            onAuthStateChanged(auth, (user) => {
+                const loadingView = document.getElementById('loading-view');
+                const authView = document.getElementById('auth-view');
+                const mainAppView = document.getElementById('main-app-view');
+
+                if (user) {
+                    userId = user.uid;
+                    isAuthReady = true;
+                    // Esconde Auth, mostra Main App
+                    loadingView.classList.add('hidden');
+                    authView.classList.add('hidden');
+                    mainAppView.classList.remove('hidden');
+                } else {
+                    userId = null;
+                    isAuthReady = true;
+                    // Esconde Loading/Main App, mostra Auth
+                    loadingView.classList.add('hidden');
+                    mainAppView.classList.add('hidden');
+                    authView.classList.remove('hidden');
+                }
+            });
+        }
+
+        // =================================================================
+        // FIREBASE FIRESTORE CRUD
+        // =================================================================
+        
+        /**
+         * Salva um novo registro de glicemia no Firestore.
+         */
+        async function saveRecord(payload) {
+            if (!db || !userId) throw new Error("Firebase não inicializado ou usuário não logado.");
+
+            // Caminho da coleção: /artifacts/{appId}/users/{userId}/glicemia_records
+            const recordsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/glicemia_records`);
+            
+            // Cria um Timestamp a partir da data e hora para garantir ordenação e filtragem corretas
+            const [d, m, y] = payload.data.split('/');
+            const dateTimeString = `${y}-${m}-${d}T${payload.hora}:00`;
+            const timestamp = Timestamp.fromDate(new Date(dateTimeString));
+
+            await addDoc(recordsCollectionRef, {
+                glicemia: parseFloat(payload.glicemia),
+                timestamp: timestamp, // Campo principal para ordenação/filtragem
+                data: payload.data,   // Manter para exibição
+                hora: payload.hora    // Manter para exibição
+            });
+        }
+        
+        /**
+         * Lê os registros de glicemia dentro de um período do Firestore.
+         */
+        async function readRecords(start, end) {
+            if (!db || !userId) return []; // Retorna vazio se não estiver pronto
+
+            const recordsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/glicemia_records`);
+
+            // Converte datas de input (YYYY-MM-DD) para objetos Date e depois Timestamp
+            const startDate = Timestamp.fromDate(new Date(start + 'T00:00:00'));
+            const endDate = Timestamp.fromDate(new Date(end + 'T23:59:59'));
+
+            const q = query(
+                recordsCollectionRef,
+                where("timestamp", ">=", startDate),
+                where("timestamp", "<=", endDate)
+                // Nota: A ordenação será feita no cliente JS para evitar erros de índice do Firestore
+            );
+            
+            const querySnapshot = await getDocs(q);
+            
+            const records = querySnapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    glicemia: data.glicemia,
+                    data: data.data,
+                    hora: data.hora,
+                    timestamp: data.timestamp.toDate() // Converte Timestamp de volta para Date
+                };
+            });
+            
+            // Ordena os registros pelo timestamp no lado do cliente
+            records.sort((a, b) => a.timestamp - b.timestamp);
+
+            return records;
+        }
+
+
+        // =================================================================
+        // NAVEGAÇÃO E SUBMISSÃO
+        // =================================================================
+        
+        function toggleView() {
+            const recordView = document.getElementById('record-view');
+            const historyView = document.getElementById('history-view');
+            const navButton = document.getElementById('nav-button');
+
+            if (currentView === 'record') {
+                recordView.classList.add('hidden');
+                historyView.classList.remove('hidden');
+                navButton.innerHTML = '<i data-lucide="plus-square" class="w-5 h-5 mr-1"></i> Novo Registro';
+                currentView = 'history';
+                // Tenta filtrar o histórico ao entrar na view
+                document.getElementById('filter-form').dispatchEvent(new Event('submit'));
+            } else {
+                historyView.classList.add('hidden');
+                recordView.classList.remove('hidden');
+                navButton.innerHTML = '<i data-lucide="history" class="w-5 h-5 mr-1"></i> Histórico';
+                currentView = 'record';
+            }
+            lucide.createIcons();
+        }
+
+        async function handleRecordSubmit(event) {
+            event.preventDefault();
+            toggleLoading(true, 'record-submit-btn');
+
+            const form = event.target;
+            const data = new FormData(form);
+            
+            // Re-formata a data de YYYY-MM-DD (input) para DD/MM/AAAA (padrão interno)
+            const [y, m, d] = data.get('data').split('-');
+            const formattedDate = `${d}/${m}/${y}`;
+
+            const payload = {
+                data: formattedDate,
+                hora: data.get('hora'),
+                glicemia: data.get('glicemia'),
+            };
+
+            try {
+                await saveRecord(payload);
+                showMessage('Registro de glicemia salvo com sucesso!');
+                form.reset();
+                setInitialDateTime(); // Redefine data e hora atuais após o reset
+            } catch (error) {
+                console.error("Erro ao salvar:", error);
+                // Exibe erro de permissão para ajudar o usuário a depurar as regras do Firestore
+                let msg = 'Erro ao salvar o registro. Verifique o console e as regras de segurança do Firebase.';
+                if (error.code && error.code === 'permission-denied') {
+                    msg = 'Permissão negada. Verifique as Regras do Firestore: Apenas o usuário logado pode salvar dados.';
+                }
+                showMessage(msg, 'error');
+            } finally {
+                toggleLoading(false, 'record-submit-btn');
+            }
+        }
+
+        async function handleFilterSubmit(event) {
+            event.preventDefault();
+            toggleLoading(true, 'filter-submit-btn');
+
+            const start = document.getElementById('start-date').value;
+            const end = document.getElementById('end-date').value;
+
+            // Define informações do período para impressão
+            document.getElementById('print-period-info').textContent = 
+                `Período: ${start.split('-').reverse().join('/')} a ${end.split('-').reverse().join('/')}`;
+
+            try {
+                const records = await readRecords(start, end);
+                
+                if (records.length === 0) {
+                    document.getElementById('results-content').innerHTML = '<p class="text-gray-500">Nenhum registro encontrado no período selecionado.</p>';
+                    renderCharts([], []); // Limpa os gráficos
+                    return;
+                }
+                
+                // Processa, renderiza a lista e os gráficos
+                const processed = processDataForDisplay(records);
+                renderResults(processed.groupedByDate);
+                renderCharts(processed.dailyAverageData, processed.allRecordsForChart);
+
+            } catch (error) {
+                console.error("Erro ao filtrar:", error);
+                showMessage('Erro ao buscar o histórico. Detalhes no console.', 'error');
+            } finally {
+                toggleLoading(false, 'filter-submit-btn');
+            }
+        }
+
+        // =================================================================
+        // PROCESSAMENTO DE DADOS E GRÁFICOS (Funções mantidas da versão anterior)
+        // =================================================================
+
+        let chartDailyAverage = null;
+        let chartAllRecords = null;
+        
+        /**
+         * Processa a lista de registros para agrupamento por data e cálculo de médias.
+         * @param {Array<Object>} records - Lista de registros {data, hora, glicemia, timestamp}.
+         */
+        function processDataForDisplay(records) {
+            const groupedByDate = {};
+            const dailyData = {}; // Usado para calcular a média
+            const allRecordsForChart = [];
+
+            records.forEach(record => {
+                const { data, hora, glicemia, timestamp } = record;
+                const value = parseFloat(glicemia);
+
+                // 1. Group by Date for display
+                if (!groupedByDate[data]) {
+                    groupedByDate[data] = [];
+                }
+                groupedByDate[data].push({ hora, glicemia: value });
+                
+                // 2. Group by Date for average calculation
+                if (!dailyData[data]) {
+                    dailyData[data] = { sum: 0, count: 0 };
+                }
+                dailyData[data].sum += value;
+                dailyData[data].count++;
+
+                // 3. Data for All Records Chart (usa timestamp para o eixo X correto)
+                allRecordsForChart.push({
+                    x: timestamp.toISOString(), // Usa ISO string para representação exata
+                    y: value,
+                    date: data,
+                    time: hora
+                });
+            });
+
+            // 4. Calculate Daily Averages
+            const dailyAverageData = [];
+            Object.keys(dailyData).forEach(date => {
+                const { sum, count } = dailyData[date];
+                const average = sum / count;
+                dailyAverageData.push({
+                    date: date,
+                    average: parseFloat(average.toFixed(1))
+                });
+            });
+
+            // Sort daily average data by date for chart consistency
+            dailyAverageData.sort((a, b) => {
+                const dateA = a.date.split('/').reverse().join('');
+                const dateB = b.date.split('/').reverse().join('');
+                return dateA.localeCompare(dateB);
+            });
+            
+            return { groupedByDate, dailyAverageData, allRecordsForChart };
+        }
+
+
+        /**
+         * Renderiza o histórico de registros agrupados por data.
+         * @param {Object} groupedData - Dados agrupados por data.
+         */
+        function renderResults(groupedData) {
+            const resultsContent = document.getElementById('results-content');
+            resultsContent.innerHTML = '';
+            
+            const sortedDates = Object.keys(groupedData).sort((a, b) => {
+                // Ordena por data (DD/MM/AAAA) em ordem decrescente
+                const dateA = a.split('/').reverse().join('');
+                const dateB = b.split('/').reverse().join('');
+                return dateB.localeCompare(dateA);
+            });
+
+            sortedDates.forEach(date => {
+                const records = groupedData[date];
+                
+                const dayCard = document.createElement('div');
+                dayCard.className = 'day-card p-4 border border-indigo-100 bg-indigo-50 rounded-lg shadow-sm';
+                
+                const dateTitle = document.createElement('h3');
+                dateTitle.className = 'text-lg font-bold text-indigo-800 mb-3 border-b border-indigo-200 pb-1';
+                dateTitle.textContent = `Data: ${date}`;
+                dayCard.appendChild(dateTitle);
+
+                const recordsContainer = document.createElement('div');
+                recordsContainer.className = 'flex flex-wrap overflow-x-auto gap-3 pb-2';
+
+                records.sort((a, b) => a.hora.localeCompare(b.hora));
+
+                records.forEach(record => {
+                    const statusClass = record.glicemia < 70 ? 'bg-red-200 text-red-800' : 
+                                        record.glicemia > 180 ? 'bg-yellow-200 text-yellow-800' : 
+                                        'bg-green-200 text-green-800';
+
+                    const recordCard = document.createElement('div');
+                    recordCard.className = `registro-card flex-shrink-0 p-3 rounded-lg font-semibold text-center ${statusClass} border border-gray-300 shadow-sm`;
+                    recordCard.innerHTML = `
+                        <div class="text-xs text-gray-700 font-normal">Hora: ${record.hora}</div>
+                        <div class="text-xl font-bold">${record.glicemia}</div>
+                        <div class="text-xs text-gray-700 font-normal">mg/dL</div>
+                    `;
+                    recordsContainer.appendChild(recordCard);
+                });
+
+                dayCard.appendChild(recordsContainer);
+                resultsContent.appendChild(dayCard);
+            });
+        }
+        
+        /**
+         * Renderiza os dois gráficos de linha (Média Diária e Todos os Registros).
+         */
+        function renderCharts(dailyAverageData, allRecordsData) {
+            // --- GRÁFICO 1: Média Diária ---
+            const ctxAvg = document.getElementById('chart-daily-average').getContext('2d');
+            if (chartDailyAverage) chartDailyAverage.destroy();
+
+            chartDailyAverage = new Chart(ctxAvg, {
+                type: 'line',
+                data: {
+                    labels: dailyAverageData.map(d => d.date),
+                    datasets: [{
+                        label: 'Média Diária (mg/dL)',
+                        data: dailyAverageData.map(d => d.average),
+                        borderColor: 'rgb(79, 70, 229)', 
+                        backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                        tension: 0.4,
+                        pointRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } },
+                    scales: {
+                        y: { beginAtZero: false, title: { display: true, text: 'Glicemia (mg/dL)' } },
+                        x: { title: { display: true, text: 'Data' } }
+                    }
+                }
+            });
+
+            // --- GRÁFICO 2: Todos os Registros ---
+            const ctxAll = document.getElementById('chart-all-records').getContext('2d');
+            if (chartAllRecords) chartAllRecords.destroy();
+
+            chartAllRecords = new Chart(ctxAll, {
+                type: 'line',
+                data: {
+                    labels: allRecordsData.map(r => `${r.date} ${r.time}`),
+                    datasets: [{
+                        label: 'Registros Individuais (mg/dL)',
+                        data: allRecordsData.map(r => r.y),
+                        borderColor: 'rgb(6, 182, 212)', 
+                        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                        tension: 0.1,
+                        pointRadius: 3,
+                        showLine: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } },
+                    scales: {
+                        y: { beginAtZero: false, title: { display: true, text: 'Glicemia (mg/dL)' } },
+                        x: { 
+                            title: { display: true, text: 'Data e Hora' },
+                            ticks: { maxTicksLimit: 10 }
+                        }
+                    }
+                }
+            });
+        }
+
+        // =================================================================
+        // INICIALIZAÇÃO
+        // =================================================================
+        window.onload = async function() {
+            setInitialDateTime();
+            setInitialFilterDates();
+
+            try {
+                // 1. Inicializa o Firebase
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                
+                // 2. Realiza o login inicial usando o token de ambiente
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // Fallback para login anônimo ou deixa o usuário usar a tela de Auth
+                    // Neste caso, a tela de Auth cuidará do login/registro
+                }
+
+                // 3. Configura o Listener de estado de autenticação
+                setupAuthListener();
+
+            } catch (error) {
+                console.error("Erro na inicialização do Firebase:", error);
+                document.getElementById('loading-view').innerHTML = `<p class="text-red-600">Erro ao iniciar o App: ${error.message}</p>`;
+            } finally {
+                // Cria os ícones do Lucide
+                lucide.createIcons();
+            }
+        };
+
+    </script>
 </body>
 </html>
